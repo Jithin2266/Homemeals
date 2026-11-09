@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "HomeMeal",
+    "slug": "homemeal",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#F7F3EC",
+    "splash": {
+      "backgroundColor": "#1F5C46"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "app.homemeal",
+      "buildNumber": "1"
+    },
+    "android": {
+      "package": "app.homemeal",
+      "adaptiveIcon": {
+        "backgroundColor": "#1F5C46",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "versionCode": 1,
+      "permissions": []
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "name": "HomeMeal",
+      "themeColor": "#1F5C46",
+      "backgroundColor": "#F7F3EC"
+    },
+    "plugins": [
+      "expo-font",
+      "expo-sqlite"
+    ]
+  }
+}
