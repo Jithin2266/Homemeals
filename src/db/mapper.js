@@ -28,7 +28,7 @@ export function toTables(db) {
   });
 
   Object.entries(db.households).forEach(([hid, h]) => {
-    T.households.push({ id: hid, name: h.household.name, timezone: h.household.timezone || 'Asia/Kolkata', status: 'active', created_at: n(h.household.createdAt) });
+    T.households.push({ id: hid, name: h.household.name, timezone: h.household.timezone || 'Asia/Kolkata', status: 'active', created_at: n(h.household.createdAt), join_code: n(h.household.joinCode) });
 
     Object.entries(h.prefs || {}).forEach(([uid, p]) => T.user_preferences.push({
       id: uid, user_id: uid, household_id: hid, schedule_alerts: p.schedule !== false, grocery_alerts: p.grocery !== false,
@@ -92,7 +92,7 @@ export function fromTables(T) {
 
   T.households.forEach((h) => {
     db.households[h.id] = {
-      household: { id: h.id, name: h.name, timezone: h.timezone, createdAt: h.created_at },
+      household: { id: h.id, name: h.name, timezone: h.timezone, createdAt: h.created_at, joinCode: h.join_code || null },
       schedules: [], groceries: [], history: [], notifications: [], customCategories: [], customDishes: [], prefs: {}, audit: [],
     };
   });

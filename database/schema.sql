@@ -1,12 +1,14 @@
 -- HomeMeal — PostgreSQL schema (generated from src/db/schema.js)
 -- Timestamps are stored as epoch ms in the app and as TIMESTAMPTZ on the server.
 
+-- Households: join_code: household code any family member can use to join as a Viewer.
 CREATE TABLE households (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   timezone TEXT,
   status TEXT CHECK (status IN ('active', 'closed')),
-  created_at TIMESTAMPTZ
+  created_at TIMESTAMPTZ,
+  join_code TEXT UNIQUE
 );
 
 -- Users: Login identity. Passwords are stored only as salted SHA-256 hashes.

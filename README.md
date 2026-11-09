@@ -18,7 +18,7 @@ Demo accounts (password `demo123`):
 | rahul@homemeal.app | Viewer (husband, main purchaser) |
 | meera@homemeal.app | Viewer (daughter) |
 
-**Registration.** Tap **Create account** on the login screen.
+**Registration.** Tap **Create account** on the login screen. Each new Creator household automatically gets a **household code** (shown in *Household members* with Share and New-code buttons). Family members join by tapping **Have a code?** and entering it. Personal one-person invites still work too.
 - **Creator:** choose "I plan the family meals", fill in your details and a household name, then verify your mobile with an OTP. This creates a new, empty household with a "Get started" checklist.
 - **Viewer:** choose "I'm joining my family" or tap **Have a code?**, then enter the invite code the Creator generated in *Household members*. The demo invite code is `AMMA42`, and the demo OTP is `1234`.
 
@@ -43,6 +43,19 @@ On the web, open two tabs and sign in as the Creator in one and a Viewer in the 
 | Notifications and preferences (FR-054–058) | `ActivityScreen`, `MoreScreen` |
 | Household members: invite, deactivate (FR-006) | `MembersScreen` |
 | Status shown by text + icon + colour (NFR-012), English/Malayalam (NFR-014) | `theme.js`, `i18n.js` |
+
+## Live app vs. demo preview
+
+- **The APK is the live app.** It starts empty, with no demo accounts. The first person registers as Creator and gets a clean household. Family members join with the household code.
+- **The web preview is demo mode.** It's built with `EXPO_PUBLIC_DEMO_MODE=1`, which adds the sample "Menon Family", the demo logins and the pretend SMS step (code 1234).
+- **Cleanup when updating:** phones that installed v1.0 or v1.1 have the sample family and its demo accounts removed automatically. Households people registered themselves are kept.
+- **Not available in the live app yet:** SMS verification and password reset. Both need the online account service.
+
+## Updates keep your data
+
+- **Same signing key on every build.** The project pins it with `keystore/homemeal.keystore` and `plugins/withStableKeystore.js`, so a new APK always installs over the old one. Android only clears app data when you uninstall.
+- **Upgrade, never reset.** On launch, saved data from any older version is upgraded in place: new columns are added (SQLite `ALTER TABLE`) and new fields such as the household code are filled in. Demo data is created only on the very first launch.
+- **For a Play Store release,** switch to your own upload key, and keep it safe.
 
 ## Getting the Android APK
 

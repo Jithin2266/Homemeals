@@ -4,9 +4,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useStore } from '../store';
-import { Avatar, Button, Field, IconBtn, Row, Tap, Txt, haptic, useFeedback } from '../ui';
+import { Avatar, Button, Chip, Field, IconBtn, Row, Tap, Txt, haptic, useFeedback } from '../ui';
 import { colors, fonts, radius, shadow } from '../theme';
 import { FadeIn, useCelebrate } from '../motion';
+import { DEMO } from '../config';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const DEMO_OTP = '1234';
@@ -28,7 +29,7 @@ export default function RegisterScreen({ onBack, initialRole }) {
   const celebrate = useCelebrate();
   const [step, setStep] = useState(initialRole ? 'details' : 'role');
   const [role, setRole] = useState(initialRole || null);
-  const [f, setF] = useState({ name: '', phone: '', email: '', password: '', confirm: '', householdName: '', code: '', agree: false });
+  const [f, setF] = useState({ name: '', phone: '', email: '', password: '', confirm: '', householdName: '', code: '', relation: 'Family', agree: false });
   const [errs, setErrs] = useState({});
   const [showPw, setShowPw] = useState(false);
   const [otp, setOtp] = useState('');
@@ -41,8 +42,8 @@ export default function RegisterScreen({ onBack, initialRole }) {
 
   // Prefill from a valid invite
   useEffect(() => {
-    if (invite) setF((p) => ({ ...p, name: p.name || invite.user.name, phone: p.phone || invite.user.phone }));
-  }, [invite?.user.id]);
+    if (invite?.user) setF((p) => ({ ...p, name: p.name || invite.user.name, phone: p.phone || invite.user.phone }));
+  }, [invite?.user?.id]);
   // Suggest a household name from the surname
   useEffect(() => {
     if (role === 'creator' && !householdTouched) {
@@ -59,8 +60,8 @@ export default function RegisterScreen({ onBack, initialRole }) {
   const validate = () => {
     const e = {};
     if (role === 'viewer') {
-      if (!f.code.trim()) e.code = 'Enter the invite code from your family';
-      else if (!invite) e.code = 'That code is not valid or was already used';
+      if (!f.code.trim()) e.code = 'Enter the code from your family';
+      else if (!invite) e.code = 'That code is not valid. Check it with the household Creator.';
     }
     if (f.name.trim().length < 2) e.name = 'Enter your full name';
     if (!/^\d{10}$/.test(f.phone)) e.phone = 'Enter a 10-digit mobile number';
@@ -71,7 +72,7 @@ export default function RegisterScreen({ onBack, initialRole }) {
     if (role === 'creator' && !f.householdName.trim()) e.householdName = 'Name your household';
     if (!f.agree) e.agree = 'Please accept to continue';
     if (!e.phone && !e.email) {
-      const taken = accountTaken({ phone: f.phone, email: f.email }, invite?.user.id);
+      const taken = accountTaken({ phone: f.phone, email: f.email }, invite?.user?.id);
       if (taken) e.form = taken;
     }
     setErrs(e);
@@ -81,17 +82,23 @@ export default function RegisterScreen({ onBack, initialRole }) {
   const next = () => {
     if (!validate()) { haptic('warn'); scroll.current?.scrollTo({ y: 0, animated: true }); return; }
     haptic('success');
+    if (!DEMO) { finish((msg) => setErrs((e) => ({ ...e, form: msg }))); return; }
     setOtp(''); setOtpErr(''); setTimer(30);
     setStep('verify');
   };
 
-  const verify = () => {
-    if (otp !== DEMO_OTP) { setOtpErr(`Incorrect code. For this demo, use ${DEMO_OTP}.`); haptic('warn'); return; }
+  // Live app: no SMS service yet, so the account is created right after the details step.
+  const finish = (onError) => {
     const r = role === 'creator' ? registerCreator(f) : registerViewer(f);
-    if (!r.ok) { setOtpErr(r.error); return; }
+    if (!r.ok) { onError(r.error); haptic('warn'); return; }
     haptic('success');
     celebrate();
     toast(role === 'creator' ? `Welcome! ${f.householdName.trim()} is ready` : `Welcome to ${invite?.household?.name || 'your household'}!`, { icon: 'sparkles' });
+  };
+
+  const verify = () => {
+    if (otp !== DEMO_OTP) { setOtpErr(`Incorrect code. For this demo, use ${DEMO_OTP}.`); haptic('warn'); return; }
+    finish(setOtpErr);
   };
 
   const back = () => {
@@ -110,7 +117,7 @@ export default function RegisterScreen({ onBack, initialRole }) {
         <Row>
           <IconBtn icon="chevron-back" label="Back" onPress={back} bg="transparent" />
           <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'center', gap: 6 }}>
-            {['Role', 'Details', 'Verify'].map((s, i) => (
+            {(DEMO ? ['Role', 'Details', 'Verify'] : ['Role', 'Details']).map((s, i) => (
               <View key={s} style={{ alignItems: 'center', gap: 4 }}>
                 <View style={{ width: i === stepIdx ? 34 : 22, height: 6, borderRadius: 3, backgroundColor: i <= stepIdx ? colors.primary : colors.line }} />
               </View>
@@ -134,7 +141,7 @@ export default function RegisterScreen({ onBack, initialRole }) {
               selected={role === 'viewer'} onPress={() => setRole('viewer')}
               emoji="🛒" tint="#A86A07" soft={colors.accentSoft}
               title="I'm joining my family" badge="Viewer"
-              points={['Needs an invite code from your Creator', 'See the published weekly menu', 'Tick off groceries while shopping']} />
+              points={['Needs the household code from your Creator', 'See the published weekly menu', 'Tick off groceries while shopping']} />
             <Button title="Continue" iconRight="arrow-forward" full disabled={!role} onPress={() => { haptic(); setStep('details'); }} style={{ marginTop: 10 }} />
           </FadeIn>
         ) : null}
@@ -148,7 +155,7 @@ export default function RegisterScreen({ onBack, initialRole }) {
               {!initialRole ? <Text onPress={() => setStep('role')} style={{ fontFamily: fonts.bold, fontSize: 13, color: colors.primary }}>Change</Text> : null}
             </Row>
             <Txt v="display" style={{ marginTop: 8 }}>{role === 'creator' ? 'Set up your household' : 'Join your household'}</Txt>
-            <Txt style={{ marginTop: 6, marginBottom: 20 }}>{role === 'creator' ? "You'll be the household's Creator. You can invite family after signing up." : 'Enter the invite code your family shared with you.'}</Txt>
+            <Txt style={{ marginTop: 6, marginBottom: 20 }}>{role === 'creator' ? "You'll be the household's Creator. You can invite family after signing up." : 'Enter the household code (or personal invite code) your family shared with you.'}</Txt>
 
             {errs.form ? (
               <View style={{ flexDirection: 'row', gap: 8, backgroundColor: colors.dangerSoft, padding: 12, borderRadius: 14, marginBottom: 14 }} accessibilityRole="alert">
@@ -160,15 +167,25 @@ export default function RegisterScreen({ onBack, initialRole }) {
             {role === 'viewer' ? (
               <View style={{ marginBottom: 6 }}>
                 <Field label="Invite code" value={f.code} onChangeText={(v) => set('code', v.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8))} placeholder="e.g. AMMA42" autoCapitalize="characters" error={errs.code}
-                  hint="Demo invite code: AMMA42" />
+                  hint={DEMO ? 'Demo codes: MENU24 (household code) · AMMA42 (personal invite)' : 'Ask your household Creator: it is shown in Household members.'} />
                 {invite ? (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.purchasedSoft, borderRadius: 16, padding: 14, marginTop: -4, marginBottom: 16 }}>
                     <Avatar user={invite.creator} size={40} />
                     <View style={{ flex: 1 }}>
                       <Txt v="title" style={{ fontSize: 15 }}>🏠 {invite.household?.name}</Txt>
-                      <Txt v="caption" style={{ color: colors.primaryDark }}>Invited by {invite.creator?.name} as {invite.user.relation}</Txt>
+                      <Txt v="caption" style={{ color: colors.primaryDark }}>{invite.user ? `Invited by ${invite.creator?.name} as ${invite.user.relation}` : `Household code from ${invite.creator?.name || 'the Creator'}`}</Txt>
                     </View>
                     <Ionicons name="checkmark-circle" size={22} color={colors.purchased} />
+                  </View>
+                ) : null}
+                {invite?.kind === 'household' ? (
+                  <View style={{ marginBottom: 16 }}>
+                    <Txt v="small" style={{ fontFamily: fonts.semibold, color: colors.ink, marginBottom: 8 }}>You are their…</Txt>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                      {['Husband', 'Wife', 'Son', 'Daughter', 'Parent', 'Grandparent', 'Helper', 'Other'].map((r) => (
+                        <Chip key={r} label={r} selected={f.relation === r} onPress={() => set('relation', r)} />
+                      ))}
+                    </View>
                   </View>
                 ) : null}
               </View>
@@ -176,7 +193,7 @@ export default function RegisterScreen({ onBack, initialRole }) {
 
             <Field label="Full name" value={f.name} onChangeText={(v) => set('name', v)} placeholder="e.g. Lakshmi Nair" error={errs.name} autoCapitalize="words" />
             <Field label="Mobile number" value={f.phone} onChangeText={(v) => set('phone', v.replace(/\D/g, '').slice(0, 10))} placeholder="10-digit mobile" keyboardType="phone-pad" error={errs.phone}
-              right={<Text style={{ fontFamily: fonts.semibold, color: colors.muted }}>🇮🇳</Text>} hint="We'll send a one-time code to verify it." />
+              right={<Text style={{ fontFamily: fonts.semibold, color: colors.muted }}>🇮🇳</Text>} hint={DEMO ? "We'll send a one-time code to verify it." : 'You will use it to sign in.'} />
             <Field label="Email (optional)" value={f.email} onChangeText={(v) => set('email', v)} placeholder="you@email.com" keyboardType="email-address" autoCapitalize="none" error={errs.email} hint="Use it to sign in or recover your password." />
             <Field label="Password" value={f.password} onChangeText={(v) => set('password', v)} placeholder="At least 6 characters" secureTextEntry={!showPw} error={errs.password}
               right={<Pressable onPress={() => setShowPw(!showPw)} hitSlop={10} accessibilityLabel={showPw ? 'Hide password' : 'Show password'}><Ionicons name={showPw ? 'eye-off-outline' : 'eye-outline'} size={20} color={colors.muted} /></Pressable>} />
@@ -198,7 +215,7 @@ export default function RegisterScreen({ onBack, initialRole }) {
               <Txt v="small" style={{ flex: 1, color: errs.agree ? colors.danger : colors.inkSoft }}>I agree to the Terms of Use and Privacy Policy. My household's data is only visible to its members.</Txt>
             </Pressable>
 
-            <Button title="Continue" iconRight="arrow-forward" full onPress={next} />
+            <Button title={DEMO ? 'Continue' : role === 'creator' ? 'Create household' : 'Join household'} icon={DEMO ? undefined : 'checkmark'} iconRight={DEMO ? 'arrow-forward' : undefined} full onPress={next} />
             <Row gap={4} style={{ justifyContent: 'center', marginTop: 18 }}>
               <Txt v="small">Already have an account?</Txt>
               <Text onPress={onBack} style={{ fontFamily: fonts.bold, color: colors.primary, fontSize: 13.5 }}>{t('signIn')}</Text>

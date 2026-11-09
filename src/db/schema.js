@@ -19,7 +19,8 @@ export const TABLES = [
   t('households', 'Households', [
     c('id', 'text', { pk: true }), c('name', 'text', { required: true }), c('timezone', 'text'),
     c('status', 'text', { check: ['active', 'closed'] }), c('created_at', 'ts'),
-  ]),
+    c('join_code', 'text', { unique: true }),
+  ], { note: 'join_code: household code any family member can use to join as a Viewer.' }),
 
   t('users', 'Users', [
     c('id', 'text', { pk: true }), c('name', 'text', { required: true }), c('email', 'text', { unique: true }),

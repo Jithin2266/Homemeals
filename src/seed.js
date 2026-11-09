@@ -184,7 +184,7 @@ export function buildSeed() {
 
   return {
     seedVersion: 3,
-    household: { id: 'hh1', name: 'Menon Family', timezone: 'Asia/Kolkata' },
+    household: { id: 'hh1', name: 'Menon Family', timezone: 'Asia/Kolkata', joinCode: 'MENU24' },
     users,
     schedules,
     groceries,
@@ -199,6 +199,9 @@ export function buildSeed() {
 }
 
 export const SEED_VERSION = SCHEMA_VERSION;
+
+// Live app: nothing but settings until someone registers.
+export const emptyDb = () => ({ seedVersion: SEED_VERSION, lang: 'en', users: [], households: {} });
 
 export const emptyHousehold = (id, name) => ({
   household: { id, name, timezone: 'Asia/Kolkata', createdAt: Date.now() },

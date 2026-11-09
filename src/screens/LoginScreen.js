@@ -7,6 +7,7 @@ import { useStore } from '../store';
 import { Button, Field, Row, Sheet, Tap, Txt, haptic, useFeedback, Avatar } from '../ui';
 import { colors, fonts, radius, shadow } from '../theme';
 import { FadeIn, PopIn } from '../motion';
+import { DEMO } from '../config';
 
 export default function LoginScreen({ onRegister }) {
   const { login, t, data, setLang } = useStore();
@@ -86,8 +87,8 @@ export default function LoginScreen({ onRegister }) {
         </View>
 
         <View style={{ paddingHorizontal: 18, marginTop: 26 }}>
-          <Txt v="label" style={{ marginBottom: 10, marginLeft: 4 }}>{t('demoAccounts')}</Txt>
-          {[creator, ...viewers].map((u) => (
+          {DEMO ? <Txt v="label" style={{ marginBottom: 10, marginLeft: 4 }}>{t('demoAccounts')}</Txt> : null}
+          {(DEMO && creator ? [creator, ...viewers] : []).map((u) => (
             <Tap key={u.id} onPress={() => demo(u)} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.surface, borderRadius: 18, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: colors.line }}
               accessibilityLabel={`Sign in as ${u.name}`}>
               <Avatar user={u} size={42} />
@@ -100,13 +101,22 @@ export default function LoginScreen({ onRegister }) {
               </View>
             </Tap>
           ))}
-          <Txt v="caption" style={{ textAlign: 'center', marginTop: 6 }}>Demo password for all accounts: demo123</Txt>
+          {DEMO ? <Txt v="caption" style={{ textAlign: 'center', marginTop: 6 }}>Demo password for all accounts: demo123</Txt> : null}
         </View>
       </ScrollView>
 
-      <Sheet visible={forgot} onClose={() => setForgot(false)} title="Reset password" subtitle="We'll send a reset link or OTP to your registered email or mobile.">
-        <Field label={t('emailOrMobile')} value={resetId} onChangeText={setResetId} autoCapitalize="none" placeholder="you@email.com" />
-        <Button title="Send reset link" full icon="paper-plane-outline" onPress={() => { setForgot(false); toast(t('resetSent'), { icon: 'mail' }); }} disabled={!resetId.trim()} />
+      <Sheet visible={forgot} onClose={() => setForgot(false)} title="Reset password" subtitle={DEMO ? "We'll send a reset link or OTP to your registered email or mobile." : 'Your account is stored on this phone.'}>
+        {DEMO ? (
+          <>
+            <Field label={t('emailOrMobile')} value={resetId} onChangeText={setResetId} autoCapitalize="none" placeholder="you@email.com" />
+            <Button title="Send reset link" full icon="paper-plane-outline" onPress={() => { setForgot(false); toast(t('resetSent'), { icon: 'mail' }); }} disabled={!resetId.trim()} />
+          </>
+        ) : (
+          <>
+            <Txt style={{ marginBottom: 14 }}>Reset links by SMS or email need the online account service, which isn't connected yet. If you're a family member, ask your household Creator to remove you and share the household code again, then register once more.</Txt>
+            <Button title="OK" full onPress={() => setForgot(false)} />
+          </>
+        )}
       </Sheet>
     </KeyboardAvoidingView>
   );

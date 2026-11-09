@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import { Platform, ScrollView, Share, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useStore } from '../store';
+import { useStore, formatCode } from '../store';
+import { PopIn } from '../motion';
+import { DEMO } from '../config';
 import { ScreenHeader } from '../nav';
 import { Avatar, Button, Card, Chip, Field, Row, Sheet, Txt, useFeedback, haptic } from '../ui';
 import { colors, fonts, shadow } from '../theme';
@@ -10,7 +12,8 @@ import { colors, fonts, shadow } from '../theme';
 const RELATIONS = ['Husband', 'Wife', 'Son', 'Daughter', 'Parent', 'Grandparent', 'Helper', 'Other'];
 
 export default function MembersScreen() {
-  const { t, data, isCreator, me, inviteMember, setMemberStatus, activateInvite } = useStore();
+  const { t, data, isCreator, me, inviteMember, setMemberStatus, activateInvite, regenerateJoinCode } = useStore();
+  const joinCode = data.household.joinCode;
   const { toast, confirm } = useFeedback();
   const insets = useSafeAreaInsets();
   const [open, setOpen] = useState(false);
@@ -55,6 +58,31 @@ export default function MembersScreen() {
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
       <ScreenHeader back title={t('members')} subtitle={`🏠 ${data.household.name}`} />
       <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 110 + insets.bottom }}>
+        {isCreator && joinCode ? (
+          <PopIn style={{ marginBottom: 14 }}>
+            <View style={{ backgroundColor: colors.primary, borderRadius: 22, padding: 18 }}>
+              <Row gap={8}>
+                <Ionicons name="key" size={16} color={colors.accent} />
+                <Text style={{ fontFamily: fonts.bold, fontSize: 12, letterSpacing: 1, color: 'rgba(255,255,255,0.8)' }}>HOUSEHOLD CODE</Text>
+              </Row>
+              <Text selectable accessibilityLabel={`Household code ${joinCode.split('').join(' ')}`} style={{ fontFamily: fonts.display, fontSize: 38, letterSpacing: 6, color: '#fff', marginTop: 6 }}>{formatCode(joinCode)}</Text>
+              <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: 'rgba(255,255,255,0.8)', marginTop: 4 }}>Family members choose "Have a code?" when they sign up and enter this code to join {data.household.name} as a Viewer.</Text>
+              <Row gap={10} style={{ marginTop: 14 }}>
+                <Button small kind="accent" icon="share-social-outline" title="Share code" onPress={async () => {
+                  const msg = `Join ${data.household.name} on HomeMeal to see our weekly menu and grocery list.\nOpen the app → Create account → "Have a code?"\nHousehold code: ${joinCode}`;
+                  try {
+                    if (Platform.OS === 'web') { await navigator.clipboard?.writeText(msg); toast('Code copied — paste it in WhatsApp', { icon: 'copy' }); }
+                    else await Share.share({ message: msg });
+                  } catch (e) {}
+                }} />
+                <Button small kind="secondary" icon="refresh" title="New code" onPress={async () => {
+                  const ok = await confirm({ title: 'Create a new household code?', body: 'The current code will stop working. Members who already joined are not affected.', ok: 'New code', icon: 'refresh' });
+                  if (ok) { regenerateJoinCode(); haptic('success'); toast('New household code created'); }
+                }} />
+              </Row>
+            </View>
+          </PopIn>
+        ) : null}
         <View style={{ flexDirection: 'row', gap: 10, backgroundColor: colors.primarySoft, borderRadius: 16, padding: 14, marginBottom: 14 }}>
           <Ionicons name="shield-checkmark-outline" size={20} color={colors.primary} />
           <Txt v="small" style={{ flex: 1, color: colors.primaryDark }}>Viewers can see published menus and tick off groceries. Only the Creator can plan meals and edit the list.</Txt>
@@ -74,7 +102,7 @@ export default function MembersScreen() {
                     <Txt v="caption">{u.relation} · {u.role === 'creator' ? 'Creator' : 'Viewer'}{u.status === 'invited' ? ` · code ${u.inviteCode || 'sent'}` : ''}</Txt>
                   </View>
                   {isCreator && u.role !== 'creator' ? (
-                    u.status === 'invited' ? (
+                    u.status === 'invited' ? (!DEMO ? <Txt v="caption">Waiting to join</Txt> : 
                       <Button small kind="soft" title="Mark joined" onPress={() => { activateInvite(u.id); toast(`${u.name.split(' ')[0]} joined · demo password demo123`); }} />
                     ) : (
                       <Button small kind={u.status === 'active' ? 'secondary' : 'soft'} title={u.status === 'active' ? 'Deactivate' : 'Reactivate'} onPress={() => toggle(u)} />

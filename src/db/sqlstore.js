@@ -62,7 +62,7 @@ export function createSqlStore(db, { label = 'SQLite on this device' } = {}) {
         const rows = await db.getAllAsync(`SELECT * FROM ${tb.name}`, []);
         T[tb.name] = rows.map((r) => Object.fromEntries(tb.columns.map((c) => [c.name, decode(c, r[c.name])])));
       }
-      return T.users.length || T.households.length ? T : null;
+      return T.users.length || T.households.length || T.app_settings.length ? T : null;
     },
     async apply(changes) {
       await init();

@@ -27,7 +27,7 @@ export async function openStore() {
         if (!T[table]) return;
         try { T[table].push(JSON.parse(io.get(k))); } catch (e) {}
       });
-      return T.users.length || T.households.length ? T : null;
+      return T.users.length || T.households.length || T.app_settings.length ? T : null;
     },
     async apply(changes) {
       changes.forEach((ch) => {

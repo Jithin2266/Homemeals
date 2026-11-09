@@ -7,6 +7,7 @@ import { useNav, ScreenHeader } from '../nav';
 import { Avatar, Card, Chip, Row, Segmented, Tap, Txt, useFeedback, Button } from '../ui';
 import { showAlert } from '../notify';
 import { pendingCount } from '../NotificationAgent';
+import { DEMO } from '../config';
 import { colors, fonts } from '../theme';
 
 export default function MoreScreen() {
@@ -107,6 +108,7 @@ export default function MoreScreen() {
           </Card>
         </View>
 
+        {DEMO ? (
         <View>
           <Txt v="label" style={{ marginLeft: 4, marginBottom: 8 }}>Demo</Txt>
           <Card pad={0}>
@@ -116,11 +118,12 @@ export default function MoreScreen() {
             }} />
           </Card>
         </View>
+        ) : null}
 
         <Card pad={0}>
           <LinkRow first icon="log-out-outline" label={t('signOut')} color={colors.danger} onPress={async () => { if (await confirm({ title: 'Sign out?', ok: t('signOut'), icon: 'log-out-outline' })) logout(); }} />
         </Card>
-        <Txt v="caption" style={{ textAlign: 'center' }}>HomeMeal v1.1 · Built to SRS v1.0</Txt>
+        <Txt v="caption" style={{ textAlign: 'center' }}>HomeMeal v1.2 · Built to SRS v1.0</Txt>
       </ScrollView>
     </View>
   );

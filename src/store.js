@@ -1,7 +1,8 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { buildDb, emptyHousehold, SEED_VERSION, newEmptyDays, uid, DISH_LIBRARY } from './seed';
+import { buildDb, emptyDb, emptyHousehold, SEED_VERSION, newEmptyDays, uid, DISH_LIBRARY } from './seed';
+import { DEMO, DEMO_HOUSEHOLD_ID, DEMO_USER_IDS } from './config';
 import { openStore } from './db/adapter';
 import { toTables, fromTables, diffTables } from './db/mapper';
 import { hashPassword, newSalt } from './db/crypto';
@@ -29,6 +30,39 @@ const session = {
   clear: async () => (webSession ? window.sessionStorage.removeItem(SESSION_KEY) : AsyncStorage.removeItem(SESSION_KEY)),
 };
 const Ctx = createContext(null);
+
+// Household / invite codes: 6 characters without look-alikes (no O/0, I/1/L).
+const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+export const normCode = (c) => (c || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+const randomCode = () => Array.from({ length: 6 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
+function newJoinCode(d) {
+  const used = new Set([...Object.values(d.households).map((h) => normCode(h.household.joinCode)), ...d.users.map((u) => normCode(u.inviteCode))]);
+  let c = randomCode();
+  while (used.has(c)) c = randomCode();
+  return c;
+}
+export const formatCode = (c) => (c ? `${c.slice(0, 3)} ${c.slice(3)}` : '');
+
+// Upgrades data saved by older app versions without losing anything.
+function upgradeDb(d) {
+  d.seedVersion = SEED_VERSION;
+  if (!DEMO) {
+    // Live app: remove the sample "Menon Family" and its demo accounts left by
+    // earlier versions. Households people registered themselves are kept.
+    const demoHh = d.households[DEMO_HOUSEHOLD_ID];
+    const isSample = demoHh && demoHh.household.name === 'Menon Family' && d.users.some((u) => u.id === 'u1' && u.email === 'anitha@homemeal.app');
+    if (isSample) {
+      delete d.households[DEMO_HOUSEHOLD_ID];
+      d.users = d.users.filter((u) => u.householdId !== DEMO_HOUSEHOLD_ID && !DEMO_USER_IDS.includes(u.id));
+    }
+  }
+  Object.values(d.households).forEach((h) => {
+    if (!h.household.joinCode) h.household.joinCode = h.household.id === 'hh1' ? 'MENU24' : newJoinCode(d);
+    h.audit = h.audit || [];
+    h.customDishes = h.customDishes || [];
+  });
+  return d;
+}
 
 export const scheduleStatus = (s) => {
   if (!s) return null;
@@ -74,14 +108,17 @@ export function StoreProvider({ children }) {
       let T = null;
       try { T = await store.loadAll(); } catch (e) { console.warn('DB load failed', e); }
       let d;
-      if (!T || Number(T.app_settings.find((x) => x.id === 'schema_version')?.value) !== SEED_VERSION) {
-        d = buildDb();
+      if (!T) {
+        // First launch: live app starts empty; the demo preview gets the sample family.
+        d = DEMO ? buildDb() : emptyDb();
         T = toTables(d);
         await store.replaceAll(T);
+        savedRef.current = T;
       } else {
-        d = fromTables(T);
+        // Existing data is always kept. Older versions are upgraded in place.
+        d = upgradeDb(fromTables(T));
+        savedRef.current = T;   // the persist step writes only what the upgrade changed
       }
-      savedRef.current = T;
       let s = null;
       try { s = await session.get(); } catch (e) {}
       setDbInfo((x) => ({ ...x, label: store.label, kind: store.kind }));
@@ -178,7 +215,7 @@ export function StoreProvider({ children }) {
     session.clear().catch(() => {});
   };
   const setLang = (lang) => mutateDb((d) => { d.lang = lang; });
-  const resetDemo = () => { setDb(buildDb()); };
+  const resetDemo = () => { if (DEMO) setDb(buildDb()); };
 
   // ---- registration ----
   const accountTaken = ({ email, phone }, ignoreId) => {
@@ -188,13 +225,22 @@ export function StoreProvider({ children }) {
     return null;
   };
   const findInvite = (code) => {
-    const c = (code || '').trim().toUpperCase();
+    const c = normCode(code);
     if (c.length < 4) return null;
-    const u = db.users.find((x) => x.status === 'invited' && (x.inviteCode || '').toUpperCase() === c);
-    if (!u) return null;
-    const hh = db.households[u.householdId];
-    const creator = db.users.find((x) => x.householdId === u.householdId && x.role === 'creator');
-    return { user: u, household: hh?.household, creator };
+    // 1) personal invite for one person
+    const u = db.users.find((x) => x.status === 'invited' && normCode(x.inviteCode) === c);
+    if (u) {
+      const hh = db.households[u.householdId];
+      const creator = db.users.find((x) => x.householdId === u.householdId && x.role === 'creator');
+      return { kind: 'personal', user: u, household: hh?.household, creator };
+    }
+    // 2) household code that anyone in the family can use
+    const hid = Object.keys(db.households).find((k) => normCode(db.households[k].household.joinCode) === c);
+    if (hid) {
+      const creator = db.users.find((x) => x.householdId === hid && x.role === 'creator');
+      return { kind: 'household', user: null, household: db.households[hid].household, creator, householdId: hid };
+    }
+    return null;
   };
   const registerCreator = (f) => {
     const taken = accountTaken(f);
@@ -205,6 +251,7 @@ export function StoreProvider({ children }) {
     mutateDb((d) => {
       d.users.push(user);
       d.households[h] = emptyHousehold(h, f.householdName.trim());
+      d.households[h].household.joinCode = newJoinCode(d);
       d.households[h].prefs[id] = { schedule: true, grocery: true, purchase: true, reminders: true };
       d.households[h].audit.unshift({ id: uid('a'), actor: id, action: 'household.created', entity: 'household', entityId: h, details: f.householdName.trim(), at: Date.now() });
     });
@@ -213,18 +260,22 @@ export function StoreProvider({ children }) {
   };
   const registerViewer = (f) => {
     const inv = findInvite(f.code);
-    if (!inv) return { ok: false, error: 'That invite code is not valid or was already used.' };
-    const taken = accountTaken(f, inv.user.id);
+    if (!inv) return { ok: false, error: 'That code is not valid. Check it with the household Creator.' };
+    const taken = accountTaken(f, inv.user?.id);
     if (taken) return { ok: false, error: taken };
     const salt = newSalt();
-    const user = { ...inv.user, name: f.name.trim(), email: (f.email || '').trim().toLowerCase(), phone: f.phone.trim(), passwordSalt: salt, passwordHash: hashPassword(f.password, salt), status: 'active', inviteCode: null, joinedAt: Date.now() };
+    const base = inv.user || {
+      id: uid('u'), householdId: inv.householdId, role: 'viewer', relation: f.relation || 'Family', createdAt: Date.now(),
+      color: ['#C4513A', '#5B4B9A', '#3F5BA9', '#E19A2B', '#2E7D5B'][Math.floor(Math.random() * 5)],
+    };
+    const user = { ...base, name: f.name.trim(), email: (f.email || '').trim().toLowerCase(), phone: f.phone.trim(), passwordSalt: salt, passwordHash: hashPassword(f.password, salt), status: 'active', inviteCode: null, joinedAt: Date.now() };
     mutateDb((d) => {
       const i = d.users.findIndex((x) => x.id === user.id);
-      d.users[i] = user;
+      if (i >= 0) d.users[i] = user; else d.users.push(user);
       const hh = d.households[user.householdId];
       hh.prefs[user.id] = { schedule: true, grocery: true, purchase: true, reminders: true };
       (hh.audit = hh.audit || []).unshift({ id: uid('a'), actor: user.id, action: 'member.joined', entity: 'household_member', entityId: `m_${user.id}`, details: user.name, at: Date.now() });
-      hh.notifications.unshift({ id: uid('n'), at: Date.now(), readBy: [], to: 'creator', type: 'member', from: user.id, title: `${user.name.split(' ')[0]} joined ${hh.household.name}`, body: `Registered as a Viewer (${user.relation})` });
+      hh.notifications.unshift({ id: uid('n'), at: Date.now(), readBy: [], to: 'creator', type: 'member', from: user.id, title: `${user.name.split(' ')[0]} joined ${hh.household.name}`, body: `Joined as a Viewer (${user.relation})${inv.kind === 'household' ? ' using the household code' : ''}` });
     });
     signIn(user);
     return { ok: true, user };
@@ -475,13 +526,24 @@ export function StoreProvider({ children }) {
     if (!name?.trim() || !/^\d{10}$/.test((phone || '').trim())) return { ok: false, error: 'Enter a name and a 10-digit mobile number.' };
     if (data.users.some((u) => u.phone === phone.trim())) return { ok: false, error: 'This number is already in your household.' };
     const taken = accountTaken({ phone }); if (taken) return { ok: false, error: 'This mobile number already belongs to another HomeMeal account.' };
-    const code = Math.random().toString(36).slice(2, 8).toUpperCase();
+    const code = newJoinCode(db);
     mutate((d) => {
       const nu = uid('u');
       audit(d, 'member.invited', 'household_member', `m_${nu}`, name.trim());
       d.users.push({ id: nu, createdAt: Date.now(), name: name.trim(), phone: phone.trim(), email: '', passwordHash: null, passwordSalt: null, role: 'viewer', status: 'invited', relation: relation || 'Family', color: ['#2E7D5B', '#3F5BA9', '#C4513A', '#E19A2B', '#5B4B9A'][d.users.length % 5], inviteCode: code });
     });
     return { ok: true, code };
+  };
+  const regenerateJoinCode = () => {
+    const g = guardCreator(); if (g) return g;
+    let code = null;
+    mutateDb((d) => {
+      const h = d.households[me.householdId];
+      code = newJoinCode(d);
+      h.household.joinCode = code;
+      h.audit.unshift({ id: uid('a'), actor: me.id, action: 'household.code_changed', entity: 'household', entityId: me.householdId, details: 'New household code', at: Date.now() });
+    });
+    return { ok: true };
   };
   const setMemberStatus = (userId, status) => {
     const g = guardCreator(); if (g) return g;
@@ -524,7 +586,7 @@ export function StoreProvider({ children }) {
     login, logout, setLang, resetDemo, findInvite, registerCreator, registerViewer, accountTaken,
     visibleSchedules, scheduleFor, findOverlap, createWeek, saveMealItem, removeMealItem, copyMeal, publishSchedule, unpublishSchedule, deleteSchedule,
     findSimilarItem, saveGroceryItem, addIngredients, setGroceryStatus, deleteGroceryItem, clearPurchased,
-    inviteMember, setMemberStatus, activateInvite,
+    inviteMember, setMemberStatus, activateInvite, regenerateJoinCode,
     myNotifications, unreadCount, markAllRead, setPref,
     userById: (id) => data?.users.find((u) => u.id === id),
     dishLibrary: data?.customDishes ? [...data.customDishes, ...DISH_LIBRARY] : DISH_LIBRARY,

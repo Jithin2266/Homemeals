@@ -3,7 +3,7 @@ import { ScrollView, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useStore, scheduleStatus, countPlanned } from '../store';
+import { useStore, scheduleStatus, countPlanned, formatCode } from '../store';
 import { useNav } from '../nav';
 import { Avatar, Button, Card, IconBtn, MealIcon, ProgressBar, Row, SchedulePill, Tap, Txt, useFeedback, haptic } from '../ui';
 import { CreateWeekSheet, GroceryEditorSheet, HistoryRow } from '../sheets';
@@ -116,7 +116,7 @@ export default function HomeScreen() {
               {[
                 { done: data.schedules.length > 0, icon: 'calendar-outline', title: 'Plan your first week', sub: 'Pick dishes for breakfast, lunch & dinner', on: () => setCreateOpen(true) },
                 { done: g.length > 0, icon: 'basket-outline', title: 'Add grocery items', sub: 'Or build them from your menu', on: () => setAddItem(true) },
-                { done: data.users.length > 1, icon: 'person-add-outline', title: 'Invite your family', sub: 'They join as Viewers with a code', on: () => nav.push('members') },
+                { done: data.users.length > 1, icon: 'person-add-outline', title: 'Invite your family', sub: data.household.joinCode ? `Share household code ${formatCode(data.household.joinCode)}` : 'They join as Viewers with a code', on: () => nav.push('members') },
               ].map((x, i) => (
                 <Tap key={x.title} onPress={x.on} disabled={x.done} scaleTo={0.985}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11, borderTopWidth: i ? 1 : 0, borderTopColor: colors.line }}>
