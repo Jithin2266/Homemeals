@@ -19,11 +19,11 @@ jobs:
 
       - name: Unpack uploaded project zip
         run: |
-          if [ -f HomeMeal-app-source.zip ]; then
-            unzip -q -o HomeMeal-app-source.zip -d /tmp/src
+          ZIP=$(ls HomeMeal-app-source*.zip 2>/dev/null | head -1); if [ -n "$ZIP" ]; then
+            unzip -q -o "$ZIP" -d /tmp/src
             rm -rf /tmp/src/homemeal/.github
             cp -r /tmp/src/homemeal/. .
-            git rm -q HomeMeal-app-source.zip
+            git rm -q "$ZIP"
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add -A
@@ -53,9 +53,9 @@ jobs:
         run: ./gradlew assembleRelease --no-daemon
 
       - name: Rename APK
-        run: mv android/app/build/outputs/apk/release/app-release.apk HomeMeal-v1.0.apk
+        run: mv android/app/build/outputs/apk/release/app-release.apk HomeMeal-v$(node -p 'require("./app.json").expo.version').apk
 
       - uses: actions/upload-artifact@v4
         with:
           name: HomeMeal-apk
-          path: HomeMeal-v1.0.apk
+          path: HomeMeal-v*.apk
