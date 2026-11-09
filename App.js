@@ -8,6 +8,7 @@ import { StoreProvider, useStore } from './src/store';
 import { FeedbackProvider } from './src/ui';
 import { BurstProvider, Splash } from './src/motion';
 import { NavProvider } from './src/nav';
+import NotificationAgent from './src/NotificationAgent';
 import { colors } from './src/theme';
 import LoginScreen from './src/screens/LoginScreen';
 import RegisterScreen from './src/screens/RegisterScreen';
@@ -47,7 +48,9 @@ function Root() {
       screens={SCREENS}
       tabBarLabels={(k) => (k === 'plan' ? (isCreator ? t('plan') : t('meals')) : t(k))}
       badgeFor={(k) => (k === 'activity' ? unreadCount : k === 'grocery' && !isCreator ? toBuy : 0)}
-    />
+    >
+      <NotificationAgent />
+    </NavProvider>
   );
 }
 

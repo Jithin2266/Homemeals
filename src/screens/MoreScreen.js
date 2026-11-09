@@ -4,13 +4,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useStore } from '../store';
 import { useNav, ScreenHeader } from '../nav';
-import { Avatar, Card, Row, Segmented, Tap, Txt, useFeedback } from '../ui';
+import { Avatar, Card, Chip, Row, Segmented, Tap, Txt, useFeedback, Button } from '../ui';
+import { showAlert } from '../notify';
+import { pendingCount } from '../NotificationAgent';
 import { colors, fonts } from '../theme';
 
 export default function MoreScreen() {
   const { t, me, data, isCreator, logout, setLang, setPref, resetDemo } = useStore();
   const nav = useNav();
-  const { confirm, toast } = useFeedback();
+  const { confirm, toast, banner } = useFeedback();
   const insets = useSafeAreaInsets();
   const prefs = data.prefs[me.id] || {};
   const members = data.users.filter((u) => u.status !== 'deactivated');
@@ -81,7 +83,27 @@ export default function MoreScreen() {
             {!isCreator ? <Toggle first k="schedule" label="Menu published or updated" sub="When the weekly plan changes" /> : null}
             {!isCreator ? <Toggle k="grocery" label="Grocery items added" sub="Including urgent requests" /> : null}
             {isCreator ? <Toggle first k="purchase" label="Purchases by family" sub="When someone marks an item bought" /> : null}
-            <Toggle k="reminders" label="Pending item reminders" sub="Evening nudge if urgent items remain" />
+            <Toggle k="sound" label="Notification sound" sub="Play the HomeMeal chime for new alerts" />
+            <Toggle k="reminders" label="Daily reminder" sub="When items are still waiting to be bought" />
+            {prefs.reminders !== false ? (
+              <View style={{ paddingHorizontal: 14, paddingBottom: 14 }}>
+                <Txt v="caption" style={{ marginBottom: 8 }}>Remind me at</Txt>
+                <Row gap={8} style={{ flexWrap: 'wrap' }}>
+                  {[[9, '9 AM'], [13, '1 PM'], [18, '6 PM'], [20, '8 PM']].map(([h, l]) => (
+                    <Chip key={h} label={l} selected={(prefs.reminderHour ?? 18) === h} onPress={() => setPref('reminderHour', h)} />
+                  ))}
+                </Row>
+              </View>
+            ) : null}
+            <View style={{ padding: 14, paddingTop: 4 }}>
+              <Button small kind="soft" icon="notifications-outline" title="Send a test notification" onPress={() => {
+                const n = pendingCount(data);
+                const title = '🛒 Test: Coconut added to the list';
+                const body = `${n} item${n === 1 ? '' : 's'} to buy now`;
+                showAlert({ title, body, sound: prefs.sound !== false, badge: n, data: { open: 'grocery' } });
+                banner({ title, body, count: n, icon: 'basket', onPress: () => nav.setTab('grocery') });
+              }} />
+            </View>
           </Card>
         </View>
 
@@ -98,7 +120,7 @@ export default function MoreScreen() {
         <Card pad={0}>
           <LinkRow first icon="log-out-outline" label={t('signOut')} color={colors.danger} onPress={async () => { if (await confirm({ title: 'Sign out?', ok: t('signOut'), icon: 'log-out-outline' })) logout(); }} />
         </Card>
-        <Txt v="caption" style={{ textAlign: 'center' }}>HomeMeal v1.0 · Built to SRS v1.0</Txt>
+        <Txt v="caption" style={{ textAlign: 'center' }}>HomeMeal v1.1 · Built to SRS v1.0</Txt>
       </ScrollView>
     </View>
   );

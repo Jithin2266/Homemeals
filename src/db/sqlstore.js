@@ -18,8 +18,17 @@ const decode = (col, v) => {
 
 export function createSqlStore(db, { label = 'SQLite on this device' } = {}) {
   let ready = null;
+  const sqlType = { text: 'TEXT', int: 'INTEGER', real: 'REAL', bool: 'INTEGER', json: 'TEXT', ts: 'INTEGER', date: 'TEXT' };
+  const migrate = async () => {
+    for (const tb of TABLES) {
+      const have = new Set((await db.getAllAsync(`PRAGMA table_info(${tb.name})`, [])).map((r) => r.name));
+      for (const col of tb.columns) {
+        if (!have.has(col.name)) await db.execAsync(`ALTER TABLE ${tb.name} ADD COLUMN ${col.name} ${sqlType[col.type]};`);
+      }
+    }
+  };
   const init = () => {
-    if (!ready) ready = db.execAsync(`PRAGMA foreign_keys = ON;\n${sqliteDDL()}`);
+    if (!ready) ready = db.execAsync(`PRAGMA foreign_keys = ON;\n${sqliteDDL()}`).then(migrate);
     return ready;
   };
   const upsertSql = {};

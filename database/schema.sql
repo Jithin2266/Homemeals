@@ -43,7 +43,9 @@ CREATE TABLE user_preferences (
   schedule_alerts BOOLEAN,
   grocery_alerts BOOLEAN,
   purchase_alerts BOOLEAN,
-  reminders BOOLEAN
+  reminders BOOLEAN,
+  sound_enabled BOOLEAN,
+  reminder_hour INTEGER
 );
 CREATE INDEX idx_user_preferences_user_id ON user_preferences(user_id);
 CREATE INDEX idx_user_preferences_household_id ON user_preferences(household_id);

@@ -36,6 +36,7 @@ export const TABLES = [
   t('user_preferences', 'Notification preferences', [
     c('id', 'text', { pk: true }), c('user_id', 'text', { ref: 'users' }), c('household_id', 'text', { ref: 'households' }),
     c('schedule_alerts', 'bool'), c('grocery_alerts', 'bool'), c('purchase_alerts', 'bool'), c('reminders', 'bool'),
+    c('sound_enabled', 'bool'), c('reminder_hour', 'int'),
   ]),
 
   t('weekly_schedules', 'Weekly schedules', [

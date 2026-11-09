@@ -68,6 +68,17 @@ cd android && ./gradlew assembleRelease
 
 To install the APK on a phone, copy it over and open it, allowing "Install unknown apps" when asked. For the Google Play Store, build an app bundle with `--profile production` and sign it with your own upload key.
 
+## Notifications & sound (v1.1)
+
+- **New grocery items:** when the Creator adds items, Viewers hear the HomeMeal chime (`assets/sounds/grocery_chime.wav`). They also get a phone notification and an in-app banner showing the number of items still to buy, for example "🛒 Urgent: Green chillies needed · 1 kg · 11 items to buy now".
+- **Badge count:** the app icon shows the number of pending items for Viewers, and unread updates for the Creator. The Grocery tab also shows the count.
+- **Daily reminder:** while items are pending, a reminder plays at a chosen time (9 AM, 1 PM, 6 PM or 8 PM).
+- **Settings:** under More → Notifications you can turn the sound or the reminder on or off and send a test notification.
+- **Catch-up:** if alerts arrived while you were away, you get one summary with the chime the next time you open the app.
+- **Android channels:** "Grocery alerts" (high priority, chime), "Shopping reminders", and "Silent updates" (used when sound is off). On Android 13 and later the app asks for notification permission on first launch.
+- **Files:** `src/notify.js` (phone), `src/notify.web.js` (browser), `src/NotificationAgent.js` (decides what to alert).
+- **Current limit:** each phone keeps its own data, so alerts reach someone signed in on the same phone or browser. To alert a Viewer's own phone when the Creator adds items on hers, add the shared server with Firebase Cloud Messaging (SRS §10). `NotificationAgent` already reacts to incoming data, so server push plugs into it.
+
 ## Database
 
 Every record is saved as its own row in a table that matches the entities in SRS §7.1. The app does **not** save one big blob.

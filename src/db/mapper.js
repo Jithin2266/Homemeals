@@ -32,7 +32,7 @@ export function toTables(db) {
 
     Object.entries(h.prefs || {}).forEach(([uid, p]) => T.user_preferences.push({
       id: uid, user_id: uid, household_id: hid, schedule_alerts: p.schedule !== false, grocery_alerts: p.grocery !== false,
-      purchase_alerts: p.purchase !== false, reminders: p.reminders !== false,
+      purchase_alerts: p.purchase !== false, reminders: p.reminders !== false, sound_enabled: p.sound !== false, reminder_hour: p.reminderHour ?? 18,
     }));
 
     h.schedules.forEach((sc) => {
@@ -108,7 +108,8 @@ export function fromTables(T) {
 
   T.user_preferences.forEach((p) => {
     const h = db.households[p.household_id]; if (!h) return;
-    h.prefs[p.user_id] = { schedule: !!p.schedule_alerts, grocery: !!p.grocery_alerts, purchase: !!p.purchase_alerts, reminders: !!p.reminders };
+    h.prefs[p.user_id] = { schedule: !!p.schedule_alerts, grocery: !!p.grocery_alerts, purchase: !!p.purchase_alerts, reminders: !!p.reminders,
+      sound: p.sound_enabled !== false, reminderHour: p.reminder_hour == null ? 18 : Number(p.reminder_hour) };
   });
 
   const itemsByMeal = {};

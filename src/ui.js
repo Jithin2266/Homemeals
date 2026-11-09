@@ -345,6 +345,20 @@ export const useFeedback = () => useContext(FeedbackCtx);
 export function FeedbackProvider({ children }) {
   const [toast, setToast] = useState(null);
   const [confirm, setConfirm] = useState(null);
+  const [bann, setBann] = useState(null);
+  const bAnim = useRef(new Animated.Value(0)).current;
+  const bTimer = useRef(null);
+  const hideBanner = useCallback(() => {
+    clearTimeout(bTimer.current);
+    Animated.timing(bAnim, { toValue: 0, duration: 220, useNativeDriver: Platform.OS !== 'web' }).start(() => setBann(null));
+  }, []);
+  const banner = useCallback((b) => {
+    clearTimeout(bTimer.current);
+    setBann({ ...b, key: Date.now() });
+    bAnim.setValue(0);
+    Animated.spring(bAnim, { toValue: 1, useNativeDriver: Platform.OS !== 'web', damping: 15, stiffness: 180 }).start();
+    bTimer.current = setTimeout(hideBanner, 6000);
+  }, []);
   const anim = useRef(new Animated.Value(0)).current;
   const timer = useRef(null);
   const insets = useSafeAreaInsets();
@@ -367,7 +381,7 @@ export function FeedbackProvider({ children }) {
   const tone = toast?.tone === 'error' ? colors.danger : colors.ink;
 
   return (
-    <FeedbackCtx.Provider value={{ toast: show, confirm: ask }}>
+    <FeedbackCtx.Provider value={{ toast: show, confirm: ask, banner }}>
       <PortalProvider>{children}</PortalProvider>
       {toast ? (
         <Animated.View pointerEvents="box-none" style={[st.toastWrap, { bottom: 92 + insets.bottom, opacity: anim, transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [30, 0] }) }] }]}>
@@ -380,6 +394,21 @@ export function FeedbackProvider({ children }) {
               </Pressable>
             ) : null}
           </View>
+        </Animated.View>
+      ) : null}
+      {bann ? (
+        <Animated.View style={[st.bannerWrap, { top: insets.top + 8, opacity: bAnim, transform: [{ translateY: bAnim.interpolate({ inputRange: [0, 1], outputRange: [-120, 0] }) }, { scale: bAnim.interpolate({ inputRange: [0, 1], outputRange: [0.95, 1] }) }] }]}>
+          <Pressable onPress={() => { hideBanner(); bann.onPress && bann.onPress(); }} style={st.banner} accessibilityRole="alert" accessibilityLiveRegion="assertive">
+            <View style={{ width: 42, height: 42, borderRadius: 14, backgroundColor: bann.bg || colors.accentSoft, alignItems: 'center', justifyContent: 'center' }}>
+              <Ionicons name={bann.icon || 'basket'} size={22} color={bann.color || '#A86A07'} />
+              {bann.count ? <View style={st.bannerCount}><Text style={{ color: '#fff', fontFamily: fonts.bold, fontSize: 10.5 }}>{bann.count > 99 ? '99+' : bann.count}</Text></View> : null}
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontFamily: fonts.bold, fontSize: 14.5, color: colors.ink }} numberOfLines={1}>{bann.title}</Text>
+              {bann.body ? <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.inkSoft, marginTop: 1 }} numberOfLines={2}>{bann.body}</Text> : null}
+            </View>
+            <Pressable onPress={hideBanner} hitSlop={10} accessibilityLabel="Dismiss"><Ionicons name="close" size={18} color={colors.muted} /></Pressable>
+          </Pressable>
         </Animated.View>
       ) : null}
       {confirm ? (
@@ -413,6 +442,9 @@ const st = StyleSheet.create({
   sheetKav: { width: '100%', maxWidth: 520, justifyContent: 'flex-end', flex: 1 },
   sheet: { backgroundColor: colors.bg, borderTopLeftRadius: 28, borderTopRightRadius: 28, width: '100%', ...shadow.float },
   handle: { width: 42, height: 5, borderRadius: 3, backgroundColor: colors.lineStrong, alignSelf: 'center', marginTop: 10, marginBottom: 10 },
+  bannerWrap: { position: 'absolute', left: 12, right: 12, zIndex: 75, alignItems: 'center' },
+  banner: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.surface, borderRadius: 20, padding: 12, width: '100%', maxWidth: 460, borderWidth: 1, borderColor: colors.line, ...shadow.float },
+  bannerCount: { position: 'absolute', top: -5, right: -6, minWidth: 20, height: 20, borderRadius: 10, backgroundColor: colors.danger, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, borderWidth: 2, borderColor: '#fff' },
   toastWrap: { position: 'absolute', left: 0, right: 0, zIndex: 70, alignItems: 'center', paddingHorizontal: 16 },
   toast: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 16, paddingVertical: 14, paddingHorizontal: 16, width: '100%', maxWidth: 460, ...shadow.float },
   dialogRoot: { flex: 1, backgroundColor: 'rgba(20,28,24,0.5)', alignItems: 'center', justifyContent: 'center', padding: 24 },
