@@ -1,0 +1,63 @@
+# Builds the HomeMeal Android APK on GitHub's servers.
+# If HomeMeal-app-source.zip is uploaded, it is unpacked into the repo first.
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unpack uploaded project zip
+        run: |
+          if [ -f HomeMeal-app-source.zip ]; then
+            unzip -q -o HomeMeal-app-source.zip -d /tmp/src
+            rm -rf /tmp/src/homemeal/.github
+            cp -r /tmp/src/homemeal/. .
+            git rm -q HomeMeal-app-source.zip
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -q -m "Unpack HomeMeal source code"
+            git push
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate native Android project
+        run: npx expo prebuild --platform android --no-install
+        env:
+          CI: 1
+
+      - name: Build release APK
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Rename APK
+        run: mv android/app/build/outputs/apk/release/app-release.apk HomeMeal-v1.0.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HomeMeal-apk
+          path: HomeMeal-v1.0.apk
