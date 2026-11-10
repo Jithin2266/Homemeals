@@ -11,7 +11,7 @@ import { DEMO } from '../config';
 import { colors, fonts } from '../theme';
 
 export default function MoreScreen() {
-  const { t, me, data, isCreator, logout, setLang, setPref, resetDemo } = useStore();
+  const { t, me, data, isCreator, logout, setLang, setPref, resetDemo, online, cloudState } = useStore();
   const nav = useNav();
   const { confirm, toast, banner } = useFeedback();
   const insets = useSafeAreaInsets();
@@ -61,6 +61,14 @@ export default function MoreScreen() {
             {members.slice(0, 5).map((u, i) => <View key={u.id} style={{ marginLeft: i ? -10 : 0, borderWidth: 2, borderColor: '#fff', borderRadius: 20, opacity: u.status === 'invited' ? 0.5 : 1 }}><Avatar user={u} size={32} /></View>)}
             <Txt v="small" style={{ flex: 1, marginLeft: 8 }}>{members.filter((u) => u.status === 'active').length} active members</Txt>
           </Row>
+          {online ? (
+            <Row gap={6} style={{ marginTop: 10 }}>
+              <Ionicons name={cloudState === 'live' ? 'cloud-done' : cloudState === 'offline' ? 'cloud-offline-outline' : 'cloud-upload-outline'} size={16} color={cloudState === 'live' ? colors.purchased : cloudState === 'offline' ? colors.danger : colors.muted} />
+              <Txt v="caption" style={{ color: cloudState === 'live' ? colors.purchased : cloudState === 'offline' ? colors.danger : colors.muted }}>
+                {cloudState === 'live' ? 'Synced with your family online' : cloudState === 'offline' ? 'Offline: changes will sync when you are back online' : 'Connecting…'}
+              </Txt>
+            </Row>
+          ) : null}
         </Card>
 
         <View>
@@ -123,7 +131,7 @@ export default function MoreScreen() {
         <Card pad={0}>
           <LinkRow first icon="log-out-outline" label={t('signOut')} color={colors.danger} onPress={async () => { if (await confirm({ title: 'Sign out?', ok: t('signOut'), icon: 'log-out-outline' })) logout(); }} />
         </Card>
-        <Txt v="caption" style={{ textAlign: 'center' }}>HomeMeal v1.2 · Built to SRS v1.0</Txt>
+        <Txt v="caption" style={{ textAlign: 'center' }}>HomeMeal v1.3 · Built to SRS v1.0</Txt>
       </ScrollView>
     </View>
   );

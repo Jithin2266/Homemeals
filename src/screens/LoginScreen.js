@@ -20,11 +20,15 @@ export default function LoginScreen({ onRegister }) {
   const [forgot, setForgot] = useState(false);
   const [resetId, setResetId] = useState('');
 
-  const submit = (a = id, b = pw) => {
-    if (!a.trim() || !b) { setErr('Enter your email/mobile and password.'); return; }
-    const r = login(a, b);
+  const [busy, setBusy] = useState(false);
+  const submit = async (a = id, b = pw) => {
+    if (!a.trim() || !b) { setErr('Enter your mobile number and password.'); return; }
+    if (busy) return;
+    setBusy(true);
+    const r = await login(a, b);
+    setBusy(false);
     if (!r.ok) { setErr(r.error === 'invalidLogin' ? t('invalidLogin') : r.error); haptic('warn'); }
-    else haptic('success');
+    else { haptic('success'); if (r.migrated) toast('Your household is now online — family can join from their own phones', { icon: 'cloud-done' }); }
   };
 
   const demo = (u) => { setId(u.email); setPw('demo123'); setErr(''); submit(u.email, 'demo123'); };
@@ -67,7 +71,7 @@ export default function LoginScreen({ onRegister }) {
           <Field label={t('emailOrMobile')} value={id} onChangeText={(v) => { setId(v); setErr(''); }} placeholder="you@email.com or 98xxxxxxxx" autoCapitalize="none" keyboardType="email-address" returnKeyType="next" />
           <Field label={t('password')} value={pw} onChangeText={(v) => { setPw(v); setErr(''); }} placeholder="••••••••" secureTextEntry={!show} error={err} onSubmitEditing={() => submit()} returnKeyType="go"
             right={<Pressable onPress={() => setShow(!show)} hitSlop={10} accessibilityLabel={show ? 'Hide password' : 'Show password'}><Ionicons name={show ? 'eye-off-outline' : 'eye-outline'} size={20} color={colors.muted} /></Pressable>} />
-          <Button title={t('signIn')} onPress={() => submit()} full iconRight="arrow-forward" />
+          <Button title={busy ? 'Signing in…' : t('signIn')} disabled={busy} onPress={() => submit()} full iconRight="arrow-forward" />
           <Pressable onPress={() => { setResetId(id); setForgot(true); }} style={{ alignSelf: 'center', marginTop: 14, padding: 4 }} accessibilityRole="button">
             <Text style={{ fontFamily: fonts.bold, color: colors.primary, fontSize: 14 }}>{t('forgotPassword')}</Text>
           </Pressable>

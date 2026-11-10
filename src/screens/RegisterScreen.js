@@ -22,7 +22,10 @@ const strength = (pw) => {
 };
 
 export default function RegisterScreen({ onBack, initialRole }) {
-  const { t, findInvite, registerCreator, registerViewer, accountTaken } = useStore();
+  const { t, findInvite, lookupCode, registerCreator, registerViewer, accountTaken, online } = useStore();
+  const [remoteInvite, setRemoteInvite] = useState(null);
+  const [checking, setChecking] = useState(false);
+  const [busy, setBusy] = useState(false);
   const { toast } = useFeedback();
   const insets = useSafeAreaInsets();
   const scroll = useRef(null);
@@ -37,7 +40,23 @@ export default function RegisterScreen({ onBack, initialRole }) {
   const [timer, setTimer] = useState(30);
   const [householdTouched, setHouseholdTouched] = useState(false);
 
-  const invite = role === 'viewer' ? findInvite(f.code) : null;
+  const invite = role === 'viewer' ? (online ? remoteInvite : findInvite(f.code)) : null;
+  // Live app: check the code online as soon as all 6 characters are typed
+  useEffect(() => {
+    if (!online || role !== 'viewer') return undefined;
+    const c = (f.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    setRemoteInvite(null);
+    if (c.length !== 6) { setChecking(false); return undefined; }
+    let alive = true;
+    setChecking(true);
+    lookupCode(c).then((r) => {
+      if (!alive) return;
+      setChecking(false);
+      if (r && r.error) setErrs((e) => ({ ...e, code: r.error }));
+      else { setRemoteInvite(r); if (!r) setErrs((e) => ({ ...e, code: 'That code is not valid. Check it with the household Creator.' })); }
+    });
+    return () => { alive = false; };
+  }, [f.code, role, online]);
   const set = (k, v) => { setF((p) => ({ ...p, [k]: v })); setErrs((e) => ({ ...e, [k]: null, form: null })); };
 
   // Prefill from a valid invite
@@ -61,6 +80,7 @@ export default function RegisterScreen({ onBack, initialRole }) {
     const e = {};
     if (role === 'viewer') {
       if (!f.code.trim()) e.code = 'Enter the code from your family';
+      else if (checking) e.code = 'Checking the code, one moment…';
       else if (!invite) e.code = 'That code is not valid. Check it with the household Creator.';
     }
     if (f.name.trim().length < 2) e.name = 'Enter your full name';
@@ -71,7 +91,7 @@ export default function RegisterScreen({ onBack, initialRole }) {
     if (f.confirm !== f.password) e.confirm = "Passwords don't match";
     if (role === 'creator' && !f.householdName.trim()) e.householdName = 'Name your household';
     if (!f.agree) e.agree = 'Please accept to continue';
-    if (!e.phone && !e.email) {
+    if (!online && !e.phone && !e.email) {
       const taken = accountTaken({ phone: f.phone, email: f.email }, invite?.user?.id);
       if (taken) e.form = taken;
     }
@@ -88,9 +108,12 @@ export default function RegisterScreen({ onBack, initialRole }) {
   };
 
   // Live app: no SMS service yet, so the account is created right after the details step.
-  const finish = (onError) => {
-    const r = role === 'creator' ? registerCreator(f) : registerViewer(f);
-    if (!r.ok) { onError(r.error); haptic('warn'); return; }
+  const finish = async (onError) => {
+    if (busy) return;
+    setBusy(true);
+    const r = await (role === 'creator' ? registerCreator(f) : registerViewer(f));
+    setBusy(false);
+    if (!r.ok) { onError(r.error); haptic('warn'); scroll.current?.scrollTo({ y: 0, animated: true }); return; }
     haptic('success');
     celebrate();
     toast(role === 'creator' ? `Welcome! ${f.householdName.trim()} is ready` : `Welcome to ${invite?.household?.name || 'your household'}!`, { icon: 'sparkles' });
@@ -167,7 +190,7 @@ export default function RegisterScreen({ onBack, initialRole }) {
             {role === 'viewer' ? (
               <View style={{ marginBottom: 6 }}>
                 <Field label="Invite code" value={f.code} onChangeText={(v) => set('code', v.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8))} placeholder="e.g. AMMA42" autoCapitalize="characters" error={errs.code}
-                  hint={DEMO ? 'Demo codes: MENU24 (household code) · AMMA42 (personal invite)' : 'Ask your household Creator: it is shown in Household members.'} />
+                  hint={checking ? 'Checking the code…' : DEMO ? 'Demo codes: MENU24 (household code) · AMMA42 (personal invite)' : 'Ask your household Creator: it is shown in Household members.'} />
                 {invite ? (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.purchasedSoft, borderRadius: 16, padding: 14, marginTop: -4, marginBottom: 16 }}>
                     <Avatar user={invite.creator} size={40} />
@@ -215,7 +238,7 @@ export default function RegisterScreen({ onBack, initialRole }) {
               <Txt v="small" style={{ flex: 1, color: errs.agree ? colors.danger : colors.inkSoft }}>I agree to the Terms of Use and Privacy Policy. My household's data is only visible to its members.</Txt>
             </Pressable>
 
-            <Button title={DEMO ? 'Continue' : role === 'creator' ? 'Create household' : 'Join household'} icon={DEMO ? undefined : 'checkmark'} iconRight={DEMO ? 'arrow-forward' : undefined} full onPress={next} />
+            <Button disabled={busy} title={busy ? 'Please wait…' : DEMO ? 'Continue' : role === 'creator' ? 'Create household' : 'Join household'} icon={DEMO ? undefined : 'checkmark'} iconRight={DEMO ? 'arrow-forward' : undefined} full onPress={next} />
             <Row gap={4} style={{ justifyContent: 'center', marginTop: 18 }}>
               <Txt v="small">Already have an account?</Txt>
               <Text onPress={onBack} style={{ fontFamily: fonts.bold, color: colors.primary, fontSize: 13.5 }}>{t('signIn')}</Text>

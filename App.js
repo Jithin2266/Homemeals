@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, Platform, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Platform, Text, View, useWindowDimensions } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useFonts } from 'expo-font';
@@ -37,8 +37,16 @@ const SCREENS = {
 };
 
 function Root() {
-  const { ready, me, t, isCreator, unreadCount, data } = useStore();
-  if (!ready) return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg }}><ActivityIndicator color={colors.primary} /></View>;
+  const { ready, me, t, isCreator, unreadCount, data, online, cloudState, sessionId } = useStore();
+  const loading = (text) => (
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg, gap: 14 }}>
+      <ActivityIndicator color={colors.primary} size="large" />
+      {text ? <Text style={{ fontFamily: 'PlusJakartaSans_600SemiBold', color: colors.inkSoft, fontSize: 15 }}>{text}</Text> : null}
+    </View>
+  );
+  if (!ready || (online && cloudState === 'starting')) return loading();
+  // Signed in online, household still downloading (e.g. first sign-in on a new phone)
+  if (!me && online && sessionId && cloudState === 'connecting') return loading('Loading your household…');
   if (!me) return <AuthFlow />;
   const toBuy = data.groceries.filter((g) => g.status === 'pending' || g.status === 'partial').length;
   return (

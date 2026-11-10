@@ -4,7 +4,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { buildDb, emptyDb, emptyHousehold, SEED_VERSION, newEmptyDays, uid, DISH_LIBRARY } from './seed';
 import { DEMO, DEMO_HOUSEHOLD_ID, DEMO_USER_IDS } from './config';
 import { openStore } from './db/adapter';
-import { toTables, fromTables, diffTables } from './db/mapper';
+import { toTables, fromTables, diffTables, householdTables, mergeHousehold } from './db/mapper';
+import * as cloud from './cloud';
 import { hashPassword, newSalt } from './db/crypto';
 import { addDays, diffDays, fmtRange, mondayOf, todayISO, weekDates, dowLong } from './dates';
 import { makeT } from './i18n';
@@ -86,6 +87,10 @@ export const isSimilar = (a, b) => {
   const [sh, lo] = x.length <= y.length ? [x, y] : [y, x];
   return sh.length > 3 && lo.includes(sh) && sh.length / lo.length >= 0.7;
 };
+
+const CLOUD = !DEMO; // live app syncs through Firebase
+const clone2 = (o) => JSON.parse(JSON.stringify(o));
+const COLORS = ['#C4513A', '#5B4B9A', '#3F5BA9', '#E19A2B', '#2E7D5B'];
 
 export function StoreProvider({ children }) {
   // db = { users: [all users], households: { [id]: household data }, lang }
@@ -201,7 +206,7 @@ export function StoreProvider({ children }) {
 
   // ---- auth ----
   const signIn = (u) => { setSessionId(u.id); session.set(u.id).catch(() => {}); };
-  const login = (idOrPhone, password) => {
+  const loginLocal = (idOrPhone, password) => {
     const key = idOrPhone.trim().toLowerCase();
     const u = db.users.find((x) => ((x.email && x.email.toLowerCase() === key) || x.phone === key) && x.passwordHash && x.passwordHash === hashPassword(password, x.passwordSalt));
     if (!u) return { ok: false, error: 'invalidLogin' };
@@ -210,7 +215,7 @@ export function StoreProvider({ children }) {
     signIn(u);
     return { ok: true, user: u };
   };
-  const logout = () => {
+  const logoutLocal = () => {
     setSessionId(null);
     session.clear().catch(() => {});
   };
@@ -242,7 +247,7 @@ export function StoreProvider({ children }) {
     }
     return null;
   };
-  const registerCreator = (f) => {
+  const registerCreatorLocal = (f) => {
     const taken = accountTaken(f);
     if (taken) return { ok: false, error: taken };
     const id = uid('u'); const h = uid('hh');
@@ -258,7 +263,7 @@ export function StoreProvider({ children }) {
     signIn(user);
     return { ok: true, user };
   };
-  const registerViewer = (f) => {
+  const registerViewerLocal = (f) => {
     const inv = findInvite(f.code);
     if (!inv) return { ok: false, error: 'That code is not valid. Check it with the household Creator.' };
     const taken = accountTaken(f, inv.user?.id);
@@ -280,6 +285,233 @@ export function StoreProvider({ children }) {
     signIn(user);
     return { ok: true, user };
   };
+
+
+  // =====================================================================
+  // ONLINE (live app): Firebase accounts, household codes and live sync
+  // =====================================================================
+  const cloudRef = useRef({ hid: null, role: null, userId: null, saved: null, unsub: null, queue: Promise.resolve() });
+  const [cloudState, setCloudState] = useState(CLOUD ? 'starting' : 'off'); // starting | signed-out | connecting | live | offline | error
+  const dbRef = useRef(null);
+  dbRef.current = db;
+
+  const stopSync = () => {
+    const c = cloudRef.current;
+    if (c.unsub) c.unsub();
+    cloudRef.current = { hid: null, role: null, userId: null, saved: null, unsub: null, queue: Promise.resolve() };
+  };
+
+  const startSync = (link) => {
+    stopSync();
+    const c = cloudRef.current;
+    Object.assign(c, { hid: link.householdId, role: link.role, userId: link.userId });
+    setCloudState('connecting');
+    c.unsub = cloud.subscribeHousehold(link.householdId, (remote) => {
+      if (cloudRef.current.hid !== link.householdId) return;
+      if (!remote.households.length && link.role === 'creator' && dbRef.current?.households[link.householdId]) {
+        // Household exists only on this phone (an upload was interrupted): finish it.
+        bootstrapHousehold(dbRef.current, link.householdId, link.userId).catch((e) => console.warn('bootstrap', e));
+        return;
+      }
+      cloudRef.current.saved = remote;
+      setDb((prev) => mergeHousehold(prev, link.householdId, remote));
+      setCloudState('live');
+    }, (err) => {
+      console.warn('sync error', err?.code, err?.message);
+      if ((err?.code || '').includes('permission-denied')) {
+        // Removed or deactivated by the Creator
+        stopSync();
+        cloud.signOutCloud().catch(() => {});
+        setSessionId(null); session.clear().catch(() => {});
+        setCloudState('signed-out');
+      } else setCloudState('offline');
+    });
+  };
+
+  // Push local edits of the signed-in household, row by row
+  useEffect(() => {
+    const c = cloudRef.current;
+    if (!CLOUD || !ready || !db || !c.hid || !c.saved) return;
+    const next = householdTables(db, c.hid);
+    if (!next) return;
+    const changes = diffTables(c.saved, next);
+    if (!changes.length) return;
+    c.saved = next;
+    const { hid, role, userId } = c;
+    c.queue = c.queue
+      .then(() => cloud.pushChanges(hid, changes, { role, userId }))
+      .then(() => setCloudState('live'))
+      .catch((e) => { console.warn('push failed', e?.code, e?.message); setCloudState('offline'); });
+  }, [db, ready]);
+
+  // Restore the signed-in account when the app opens
+  useEffect(() => {
+    if (!CLOUD || !ready) return undefined;
+    const off = cloud.onAuth(async (user) => {
+      if (!user) {
+        stopSync();
+        // A session from the older offline version: sign in again once to move it online.
+        setSessionId((cur) => { if (cur) session.clear().catch(() => {}); return null; });
+        setCloudState('signed-out');
+        return;
+      }
+      if (cloudRef.current.hid) return; // already started by login/registration
+      try {
+        const link = await cloud.getLink(user.uid);
+        if (!link) { setCloudState('signed-out'); return; }
+        setSessionId(link.userId); session.set(link.userId).catch(() => {});
+        startSync({ householdId: link.householdId, role: link.role, userId: link.userId });
+      } catch (e) { setCloudState('offline'); }
+    });
+    return off;
+  }, [ready]);
+
+  /** Upload a household that so far exists only on this phone (new or from the offline version). */
+  async function bootstrapHousehold(d, hid, userId) {
+    const h = d.households[hid].household;
+    const creator = d.users.find((u) => u.id === userId);
+    const T = householdTables(d, hid);
+    await cloud.setHouseholdDoc(hid, T.households[0]);
+    await cloud.setRow(hid, 'household_members', T.household_members.find((m) => m.user_id === userId));
+    await cloud.setJoinCode(normCode(h.joinCode), { householdId: hid, type: 'household', householdName: h.name, creatorName: creator?.name || '' });
+    for (const u of d.users.filter((x) => x.householdId === hid && x.status === 'invited' && x.inviteCode)) {
+      await cloud.setJoinCode(normCode(u.inviteCode), { householdId: hid, type: 'personal', memberUserId: u.id, memberName: u.name, relation: u.relation || 'Family', householdName: h.name, creatorName: creator?.name || '' });
+    }
+    await cloud.pushChanges(hid, diffTables({}, T), { role: 'creator', userId });
+    return T;
+  }
+
+  async function uniqueCode(d) {
+    for (let i = 0; i < 8; i++) {
+      const c = newJoinCode(d);
+      if (!(await cloud.getJoinCode(c))) return c;
+    }
+    throw new Error('Could not create a code. Please try again.');
+  }
+
+  const loginCloud = async (idOrPhone, password) => {
+    const key = idOrPhone.trim().toLowerCase();
+    const phone = /^\d{10}$/.test(key) ? key : db.users.find((u) => (u.email || '').toLowerCase() === key)?.phone;
+    if (!phone) return { ok: false, error: 'Please sign in with your 10-digit mobile number.' };
+    try {
+      const user = await cloud.signInPhone(phone, password);
+      const link = await cloud.getLink(user.uid);
+      if (!link) { await cloud.signOutCloud(); return { ok: false, error: 'This account is not part of a household yet. Register again with your household code.' }; }
+      setSessionId(link.userId); session.set(link.userId).catch(() => {});
+      startSync({ householdId: link.householdId, role: link.role, userId: link.userId });
+      return { ok: true };
+    } catch (e) {
+      const code = e?.code || '';
+      if (code.includes('invalid-credential') || code.includes('user-not-found') || code.includes('wrong-password')) {
+        // Account made with the offline version (v1.0–v1.2): move it online now.
+        const local = db.users.find((u) => u.phone === phone && u.passwordHash && u.passwordHash === hashPassword(password, u.passwordSalt));
+        if (local) return migrateLocal(local, password);
+      }
+      return { ok: false, error: cloud.friendlyError(e) };
+    }
+  };
+
+  async function migrateLocal(local, password) {
+    const hid = local.householdId;
+    if (!db.households[hid]) return { ok: false, error: 'Your household data was not found on this phone.' };
+    if (local.status !== 'active') return { ok: false, error: 'This account has been deactivated by the household Creator.' };
+    try {
+      const cu = await cloud.signUpPhone(local.phone, password);
+      if (local.role === 'creator') {
+        let d = clone2(db);
+        let code = normCode(d.households[hid].household.joinCode);
+        if (!code || (await cloud.getJoinCode(code))) { code = await uniqueCode(d); d.households[hid].household.joinCode = code; }
+        for (const u of d.users.filter((x) => x.householdId === hid && x.status === 'invited' && x.inviteCode)) {
+          if (await cloud.getJoinCode(normCode(u.inviteCode))) u.inviteCode = await uniqueCode(d);
+        }
+        setDb(d);
+        await cloud.createLink(cu.uid, { householdId: hid, userId: local.id, role: 'creator' });
+        await bootstrapHousehold(d, hid, local.id);
+      } else {
+        await cloud.createLink(cu.uid, { householdId: hid, userId: local.id, role: local.role, joinedWith: normCode(db.households[hid].household.joinCode) });
+      }
+      setSessionId(local.id); session.set(local.id).catch(() => {});
+      startSync({ householdId: hid, role: local.role, userId: local.id });
+      return { ok: true, migrated: true };
+    } catch (e) {
+      if ((e?.code || '').includes('permission-denied') && local.role !== 'creator') {
+        await cloud.signOutCloud().catch(() => {});
+        return { ok: false, error: 'Ask your household Creator to install the new version and sign in first, then try again.' };
+      }
+      return { ok: false, error: cloud.friendlyError(e) };
+    }
+  }
+
+  const registerCreatorCloud = async (f) => {
+    try {
+      const cu = await cloud.signUpPhone(f.phone.trim(), f.password);
+      const userId = cu.uid; const hid = uid('hh'); const now = Date.now();
+      const d = clone2(db);
+      const code = await uniqueCode(d);
+      const user = { id: userId, householdId: hid, name: f.name.trim(), email: (f.email || '').trim().toLowerCase(), phone: f.phone.trim(), passwordSalt: null, passwordHash: null, role: 'creator', status: 'active', color: '#1F5C46', relation: 'Homemaker', createdAt: now, joinedAt: now };
+      d.users.push(user);
+      d.households[hid] = emptyHousehold(hid, f.householdName.trim());
+      d.households[hid].household.joinCode = code;
+      d.households[hid].prefs[userId] = { schedule: true, grocery: true, purchase: true, reminders: true, sound: true, reminderHour: 18 };
+      d.households[hid].audit.unshift({ id: uid('a'), actor: userId, action: 'household.created', entity: 'household', entityId: hid, details: f.householdName.trim(), at: now });
+      setDb(d);
+      await cloud.createLink(cu.uid, { householdId: hid, userId, role: 'creator' });
+      await bootstrapHousehold(d, hid, userId);
+      setSessionId(userId); session.set(userId).catch(() => {});
+      startSync({ householdId: hid, role: 'creator', userId });
+      return { ok: true, user };
+    } catch (e) { return { ok: false, error: cloud.friendlyError(e) }; }
+  };
+
+  /** Look up a household / invite code online (for the registration screen). */
+  const lookupCode = async (raw) => {
+    const code = normCode(raw);
+    if (code.length < 6) return null;
+    if (!CLOUD) return findInvite(code);
+    try {
+      const jc = await cloud.getJoinCode(code);
+      if (!jc) return null;
+      return {
+        kind: jc.type, householdId: jc.householdId,
+        household: { name: jc.householdName }, creator: { name: jc.creatorName, color: '#1F5C46' },
+        user: jc.type === 'personal' ? { id: jc.memberUserId, name: jc.memberName, relation: jc.relation, phone: '' } : null,
+      };
+    } catch (e) { return { error: cloud.friendlyError(e) }; }
+  };
+
+  const registerViewerCloud = async (f) => {
+    const code = normCode(f.code);
+    try {
+      const jc = await cloud.getJoinCode(code);
+      if (!jc) return { ok: false, error: 'That code is not valid. Check it with the household Creator.' };
+      const cu = await cloud.signUpPhone(f.phone.trim(), f.password);
+      const userId = jc.type === 'personal' ? jc.memberUserId : cu.uid;
+      const hid = jc.householdId; const now = Date.now();
+      const name = f.name.trim(); const relation = jc.type === 'personal' ? (jc.relation || 'Family') : (f.relation || 'Family');
+      await cloud.createLink(cu.uid, { householdId: hid, userId, role: 'viewer', joinedWith: code });
+      await cloud.setRow(hid, 'household_members', { id: `m_${userId}`, household_id: hid, user_id: userId, role: 'viewer', relation, membership_status: 'active', invite_code: null, joined_at: now });
+      await cloud.setRow(hid, 'users', { id: userId, name, email: (f.email || '').trim().toLowerCase() || null, phone: f.phone.trim(), password_hash: null, password_salt: null, avatar_color: COLORS[Math.floor(Math.random() * COLORS.length)], account_status: 'active', created_at: now });
+      await cloud.setRow(hid, 'user_preferences', { id: userId, user_id: userId, household_id: hid, schedule_alerts: true, grocery_alerts: true, purchase_alerts: true, reminders: true, sound_enabled: true, reminder_hour: 18 });
+      await cloud.setRow(hid, 'notifications', { id: uid('n'), household_id: hid, target_role: 'creator', type: 'member', title: `${name.split(' ')[0]} joined ${jc.householdName || 'the household'}`, message: `Joined as a Viewer (${relation})${jc.type === 'household' ? ' using the household code' : ''}`, schedule_id: null, from_user_id: userId, meta: null, created_at: now });
+      await cloud.setRow(hid, 'audit_log', { id: uid('a'), household_id: hid, actor_id: userId, action: 'member.joined', entity: 'household_member', entity_id: `m_${userId}`, details: name, created_at: now });
+      if (jc.type === 'personal') await cloud.deleteJoinCode(code);
+      setSessionId(userId); session.set(userId).catch(() => {});
+      startSync({ householdId: hid, role: 'viewer', userId });
+      return { ok: true };
+    } catch (e) { return { ok: false, error: cloud.friendlyError(e) }; }
+  };
+
+  const logoutCloud = async () => {
+    stopSync();
+    await cloud.signOutCloud().catch(() => {});
+    setSessionId(null); session.clear().catch(() => {});
+    setCloudState('signed-out');
+  };
+
+  const login = CLOUD ? loginCloud : loginLocal;
+  const logout = CLOUD ? logoutCloud : logoutLocal;
+  const registerCreator = CLOUD ? registerCreatorCloud : registerCreatorLocal;
+  const registerViewer = CLOUD ? registerViewerCloud : registerViewerLocal;
 
   // ---- schedules ----
   const findOverlap = (startDate, ignoreId) =>
@@ -527,11 +759,16 @@ export function StoreProvider({ children }) {
     if (data.users.some((u) => u.phone === phone.trim())) return { ok: false, error: 'This number is already in your household.' };
     const taken = accountTaken({ phone }); if (taken) return { ok: false, error: 'This mobile number already belongs to another HomeMeal account.' };
     const code = newJoinCode(db);
+    const nu = uid('u');
     mutate((d) => {
-      const nu = uid('u');
       audit(d, 'member.invited', 'household_member', `m_${nu}`, name.trim());
       d.users.push({ id: nu, createdAt: Date.now(), name: name.trim(), phone: phone.trim(), email: '', passwordHash: null, passwordSalt: null, role: 'viewer', status: 'invited', relation: relation || 'Family', color: ['#2E7D5B', '#3F5BA9', '#C4513A', '#E19A2B', '#5B4B9A'][d.users.length % 5], inviteCode: code });
     });
+    if (CLOUD) {
+      const h = data.household;
+      cloud.setJoinCode(normCode(code), { householdId: me.householdId, type: 'personal', memberUserId: nu, memberName: name.trim(), relation: relation || 'Family', householdName: h.name, creatorName: me.name })
+        .catch((e) => console.warn('invite code', e));
+    }
     return { ok: true, code };
   };
   const regenerateJoinCode = () => {
@@ -539,8 +776,14 @@ export function StoreProvider({ children }) {
     let code = null;
     mutateDb((d) => {
       const h = d.households[me.householdId];
+      const old = h.household.joinCode;
       code = newJoinCode(d);
       h.household.joinCode = code;
+      if (CLOUD) {
+        cloud.deleteJoinCode(normCode(old))
+          .then(() => cloud.setJoinCode(code, { householdId: me.householdId, type: 'household', householdName: h.household.name, creatorName: me.name }))
+          .catch((e) => console.warn('household code', e));
+      }
       h.audit.unshift({ id: uid('a'), actor: me.id, action: 'household.code_changed', entity: 'household', entityId: me.householdId, details: 'New household code', at: Date.now() });
     });
     return { ok: true };
@@ -583,7 +826,7 @@ export function StoreProvider({ children }) {
 
   const value = {
     ready, data, me, isCreator, t, db, dbInfo,
-    login, logout, setLang, resetDemo, findInvite, registerCreator, registerViewer, accountTaken,
+    login, logout, setLang, resetDemo, findInvite, lookupCode, registerCreator, registerViewer, accountTaken, cloudState, sessionId, online: CLOUD,
     visibleSchedules, scheduleFor, findOverlap, createWeek, saveMealItem, removeMealItem, copyMeal, publishSchedule, unpublishSchedule, deleteSchedule,
     findSimilarItem, saveGroceryItem, addIngredients, setGroceryStatus, deleteGroceryItem, clearPurchased,
     inviteMember, setMemberStatus, activateInvite, regenerateJoinCode,

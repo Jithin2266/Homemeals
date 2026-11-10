@@ -1,0 +1,83 @@
+rules_version = '2';
+// HomeMeal security rules: every household's data is visible only to its active members.
+// userHouseholds/{authUid}  -> { householdId, userId, role, joinedWith }
+// joinCodes/{CODE}          -> { householdId, type: 'household' | 'personal', memberUserId? }
+// households/{hid}          -> household info; rows live in households/{hid}/{table}/{rowId}
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function linkPath() { return /databases/$(database)/documents/userHouseholds/$(request.auth.uid); }
+    function linked() { return signedIn() && exists(linkPath()); }
+    function link() { return get(linkPath()).data; }
+    function linkedTo(hid) { return linked() && link().householdId == hid; }
+    function memberOf(hid) {
+      return linkedTo(hid)
+        && get(/databases/$(database)/documents/households/$(hid)/household_members/$('m_' + link().userId)).data.membership_status == 'active';
+    }
+    function creatorOf(hid) { return memberOf(hid) && link().role == 'creator'; }
+    function code(c) { return get(/databases/$(database)/documents/joinCodes/$(c)).data; }
+
+    // Which household an account belongs to
+    match /userHouseholds/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow create: if signedIn() && request.auth.uid == uid && (
+        // a Creator starting a brand-new household
+        (request.resource.data.role == 'creator'
+          && !exists(/databases/$(database)/documents/households/$(request.resource.data.householdId)))
+        // a Viewer joining with a valid code for that household
+        || (request.resource.data.role == 'viewer'
+          && exists(/databases/$(database)/documents/joinCodes/$(request.resource.data.joinedWith))
+          && code(request.resource.data.joinedWith).householdId == request.resource.data.householdId
+          && (code(request.resource.data.joinedWith).type == 'household'
+              || code(request.resource.data.joinedWith).memberUserId == request.resource.data.userId))
+      );
+      allow update, delete: if false;
+    }
+
+    // Codes: anyone may check a code they typed; only the household's Creator manages them
+    match /joinCodes/{c} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if creatorOf(request.resource.data.householdId);
+      allow update: if creatorOf(resource.data.householdId);
+      allow delete: if creatorOf(resource.data.householdId)
+        || (linked() && resource.data.type == 'personal' && resource.data.memberUserId == link().userId);
+    }
+
+    match /households/{hid} {
+      allow get: if linkedTo(hid);
+      allow list: if false;
+      allow create: if linkedTo(hid) && link().role == 'creator';
+      allow update: if creatorOf(hid);
+      allow delete: if false;
+
+      match /household_members/{mid} {
+        allow read: if memberOf(hid);
+        allow create: if creatorOf(hid) || (linkedTo(hid)
+          && mid == 'm_' + link().userId
+          && request.resource.data.user_id == link().userId
+          && request.resource.data.role == link().role
+          && request.resource.data.membership_status == 'active');
+        allow update: if creatorOf(hid) || (linkedTo(hid)
+          && resource.data.user_id == link().userId
+          && resource.data.membership_status == 'invited'
+          && request.resource.data.membership_status == 'active'
+          && request.resource.data.role == 'viewer');
+        allow delete: if creatorOf(hid);
+      }
+
+      match /users/{uid2} {
+        allow read: if memberOf(hid);
+        allow create, update: if creatorOf(hid) || (linkedTo(hid) && uid2 == link().userId);
+        allow delete: if creatorOf(hid);
+      }
+
+      // Everything else (menus, groceries, history, notifications)
+      match /{table}/{rid} {
+        allow read: if memberOf(hid);
+        allow write: if creatorOf(hid) || (memberOf(hid) && table in
+          ['grocery_items', 'purchase_history', 'notifications', 'notification_reads', 'audit_log', 'user_preferences']);
+      }
+    }
+  }
+}

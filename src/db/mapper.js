@@ -191,18 +191,58 @@ export function fromTables(T) {
   return db;
 }
 
+// Stable comparison: same values in schema column order, object keys sorted.
+const canonVal = (v) => {
+  if (v === undefined || v === null) return null;
+  if (Array.isArray(v)) return v.map(canonVal);
+  if (typeof v === 'object') return Object.keys(v).sort().reduce((o, k) => { o[k] = canonVal(v[k]); return o; }, {});
+  return v;
+};
+export const canonRow = (tb, row) => JSON.stringify(tb.columns.map((c) => canonVal(row[c.name])));
+
 // Row-level diff: only rows that changed are written (FR-042 sync friendliness).
 export function diffTables(prev, next) {
   const changes = [];
   TABLES.forEach((tb) => {
-    const a = new Map((prev?.[tb.name] || []).map((r) => [r.id, JSON.stringify(r)]));
+    if (!(tb.name in next)) return;
+    const a = new Map((prev?.[tb.name] || []).map((r) => [r.id, canonRow(tb, r)]));
     const b = new Map((next[tb.name] || []).map((r) => [r.id, r]));
     const upserts = []; const deletes = [];
-    b.forEach((row, id) => { if (a.get(id) !== JSON.stringify(row)) upserts.push(row); });
+    b.forEach((row, id) => { if (a.get(id) !== canonRow(tb, row)) upserts.push(row); });
     a.forEach((_, id) => { if (!b.has(id)) deletes.push(id); });
     if (upserts.length || deletes.length) changes.push({ table: tb.name, upserts, deletes });
   });
   return changes;
+}
+
+// ---- Cloud helpers: one household at a time ----
+const LOCAL_ONLY = ['app_settings', 'grocery_categories'];
+
+/** Rows of one household as stored online (no device settings, no password hashes). */
+export function householdTables(db, hid) {
+  if (!db.households[hid]) return null;
+  const T = toTables({ ...db, users: db.users.filter((u) => u.householdId === hid), households: { [hid]: db.households[hid] } });
+  LOCAL_ONLY.forEach((k) => delete T[k]);
+  T.users = T.users.map((u) => ({ ...u, password_hash: null, password_salt: null }));
+  return T;
+}
+
+/** Replace one household (and its users) in the local model with rows from the cloud. */
+export function mergeHousehold(db, hid, remote) {
+  const T = { app_settings: [{ id: 'lang', value: db.lang || 'en' }, { id: 'schema_version', value: String(db.seedVersion) }] };
+  TABLES.forEach((tb) => { if (!T[tb.name]) T[tb.name] = remote[tb.name] || []; });
+  const one = fromTables(T);
+  if (!one.households[hid]) return db;
+  const keepLocal = new Map(db.users.filter((u) => u.householdId === hid).map((u) => [u.id, u]));
+  const users = one.users.map((u) => {
+    const old = keepLocal.get(u.id);
+    return old ? { ...u, passwordHash: old.passwordHash, passwordSalt: old.passwordSalt } : u;
+  });
+  return {
+    ...db,
+    users: [...db.users.filter((u) => u.householdId !== hid && !users.some((x) => x.id === u.id)), ...users],
+    households: { ...db.households, [hid]: one.households[hid] },
+  };
 }
 
 export const countRows = (T) => TABLES.reduce((acc, tb) => acc + (T[tb.name]?.length || 0), 0);

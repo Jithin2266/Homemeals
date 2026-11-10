@@ -81,6 +81,18 @@ cd android && ./gradlew assembleRelease
 
 To install the APK on a phone, copy it over and open it, allowing "Install unknown apps" when asked. For the Google Play Store, build an app bundle with `--profile production` and sign it with your own upload key.
 
+## Online households (v1.3, Firebase)
+
+Accounts and household data now live in Firebase (project `homemeal-c6116`), so a household code typed on **any phone** joins that family.
+
+- **Sign-in:** Firebase Auth (email/password; a phone number is stored as `<phone>@phone.homemeal.app`).
+- **Firestore layout:** `userHouseholds/{uid}` (which household an account belongs to), `joinCodes/{CODE}` (household + personal invite codes), `households/{hid}` and one sub-collection per table (`households/{hid}/grocery_items/{id}` …) — the same tables as the local database.
+- **Sync:** every phone keeps its local SQLite copy and listens live to the household; only changed rows are sent. Works offline and catches up when back online.
+- **Security rules:** `firebase/firestore.rules` (published). Only members can read a household; only the Creator edits menus, members and codes; Viewers can only update groceries/purchases/notifications and their own profile.
+- **Moving old accounts online:** accounts created in v1.0–v1.2 move online automatically the first time they sign in on v1.3. The Creator should sign in first, then Viewers.
+- **Limit (free Spark plan):** alerts arrive while the app is open or in recent apps. Push alerts when the app is fully closed need Cloud Messaging plus a small server (Blaze plan).
+- The web preview stays a self-contained offline demo.
+
 ## Notifications & sound (v1.1)
 
 - **New grocery items:** when the Creator adds items, Viewers hear the HomeMeal chime (`assets/sounds/grocery_chime.wav`). They also get a phone notification and an in-app banner showing the number of items still to buy, for example "🛒 Urgent: Green chillies needed · 1 kg · 11 items to buy now".
